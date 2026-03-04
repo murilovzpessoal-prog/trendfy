@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trendfy - Clone Perfeito</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      color-scheme: dark;
+      --brand-cyan: #3B82F6;
+      --brand-blue: #3B82F6;
+      --brand-purple: #8B5CF6;
+      --brand-pink: #EC4899;
+      --bg-dark: #0B0B0E;
+      --surface-dark: #16161A;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--bg-dark);
+      color: #e1e1e6;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      transition: background-color 0.3s ease, color 0.3s ease;
+    }
+
+    .gradient-title {
+      background: linear-gradient(to right, #ffffff 0%, #ffffff 55%, #3B82F6 100%) !important;
+      -webkit-background-clip: text !important;
+      -webkit-text-fill-color: transparent !important;
+      background-clip: text !important;
+      color: transparent !important;
+    }
+
+    /* ================================
+       LIGHT MODE OVERRIDES
+    ================================ */
+    body.light-mode {
+      color-scheme: light;
+      background-color: #f4f4f8;
+      color: #111118;
+    }
+
+    /* Backgrounds */
+    body.light-mode .bg-\[\#0B0B0E\],
+    body.light-mode .bg-\[\#0b0b0e\] {
+      background-color: #ffffff !important;
+    }
+
+    body.light-mode .bg-\[\#16161A\],
+    body.light-mode .bg-\[\#16161a\] {
+      background-color: #f0f0f5 !important;
+    }
+
+    body.light-mode .bg-\[\#1c1c1f\] {
+      background-color: #e8e8ee !important;
+    }
+
+    body.light-mode .bg-\[\#24242a\] {
+      background-color: #dcdce6 !important;
+    }
+
+    body.light-mode .bg-black {
+      background-color: #f8f8fc !important;
+    }
+
+    body.light-mode .bg-\[\#0c0c0e\] {
+      background-color: #fafafd !important;
+    }
+
+    /* Text */
+    body.light-mode .text-white {
+      color: #111118 !important;
+    }
+
+    body.light-mode .text-\[\#e1e1e6\] {
+      color: #2a2a35 !important;
+    }
+
+    body.light-mode .text-\[\#8d8d99\] {
+      color: #55556a !important;
+    }
+
+    body.light-mode .text-\[\#5b5b7b\] {
+      color: #6b6b85 !important;
+    }
+
+    body.light-mode .text-\[\#44444f\] {
+      color: #7a7a8f !important;
+    }
+
+    /* Borders */
+    body.light-mode .border-\[\#222226\] {
+      border-color: #d0d0da !important;
+    }
+
+    body.light-mode .border-\[\#1c1c1f\] {
+      border-color: #dcdce6 !important;
+    }
+
+    body.light-mode .border-\[\#27272a\] {
+      border-color: #c8c8d4 !important;
+    }
+
+    body.light-mode .border-\[\#44444f\] {
+      border-color: #b0b0be !important;
+    }
+
+    /* Header */
+    body.light-mode header {
+      background-color: #ffffff !important;
+      border-color: #e0e0ea !important;
+    }
+
+    /* Logo text */
+    body.light-mode header .text-white {
+      color: #111118 !important;
+    }
+
+    /* Nav active underline keeps brand color */
+    body.light-mode nav .text-\[\#8d8d99\] {
+      color: #6b6b85 !important;
+    }
+
+    /* Inputs/Textareas */
+    body.light-mode textarea,
+    body.light-mode input[type="text"] {
+      background-color: #f0f0f5 !important;
+      color: #111118 !important;
+      border-color: #d0d0da !important;
+    }
+
+    body.light-mode textarea::placeholder,
+    body.light-mode input::placeholder {
+      color: #9999aa !important;
+    }
+
+    /* Scrollbar */
+    body.light-mode .custom-scrollbar::-webkit-scrollbar-track {
+      background: #f4f4f8;
+    }
+
+    body.light-mode .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #c8c8d8;
+      border-color: #f4f4f8;
+    }
+
+    /* Keep brand/accent colors intact */
+    body.light-mode .text-\[\#3B82F6\] {
+      color: #3B82F6 !important;
+    }
+
+    body.light-mode .text-\[\#3B82F6\] {
+      color: #3B82F6 !important;
+    }
+
+    body.light-mode .text-\[\#8B5CF6\] {
+      color: #8B5CF6 !important;
+    }
+
+    body.light-mode .text-\[\#EC4899\] {
+      color: #EC4899 !important;
+    }
+
+    body.light-mode .text-\[\#00b37e\] {
+      color: #00904d !important;
+    }
+
+    body.light-mode .text-\[\#f59e0b\] {
+      color: #d97706 !important;
+    }
+
+    /* Hover states for buttons */
+    body.light-mode .hover\:bg-\[\#24242a\]:hover {
+      background-color: #dcdce6 !important;
+    }
+
+    body.light-mode .hover\:bg-\[\#16161A\]:hover {
+      background-color: #e8e8f0 !important;
+    }
+
+    /* Card surfaces */
+    body.light-mode .rounded-\[48px\].bg-black,
+    body.light-mode .rounded-\[56px\].bg-\[\#16161A\] {
+      box-shadow: 0 2px 24px rgba(0, 0, 0, 0.07) !important;
+    }
+
+    /* Smooth all transitions */
+    body.light-mode * {
+      transition: background-color 0.25s ease, color 0.15s ease, border-color 0.2s ease;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: var(--bg-dark);
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #222226;
+      border-radius: 10px;
+      border: 2px solid var(--bg-dark);
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #33333a;
+    }
+  </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.4",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "lucide-react": "https://esm.sh/lucide-react@^0.575.0"
+  }
+}
+</script>
+  <link rel="stylesheet" href="/index.css">
+</head>
+
+<body class="custom-scrollbar">
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+
+</html>

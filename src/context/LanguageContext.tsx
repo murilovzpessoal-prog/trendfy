@@ -1,0 +1,28 @@
+import React, { createContext, useContext, useState } from 'react';
+import { translations, Language, TranslationKey } from '../translations';
+
+interface LanguageContextProps {
+    language: Language;
+    setLanguage: (lang: Language) => void;
+    t: (key: TranslationKey) => string;
+}
+
+const LanguageContext = createContext<LanguageContextProps>({
+    language: 'pt',
+    setLanguage: () => { },
+    t: (key) => key.toString(),
+});
+
+export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+    const [language, setLanguage] = useState<Language>('pt');
+
+    const t = (key: TranslationKey) => translations[language][key] || key;
+
+    return (
+        <LanguageContext.Provider value={{ language, setLanguage, t }}>
+            {children}
+        </LanguageContext.Provider>
+    );
+};
+
+export const useTranslation = () => useContext(LanguageContext);
