@@ -1,6 +1,8 @@
 
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { supabase } from './src/lib/supabase';
+import { generateUGCPrompt, generatePerTakePrompts } from './src/lib/promptGenerator';
+import { generateGeminiPerTakePrompts, generateGeminiScript } from './src/lib/gemini';
 import { translations, Language, TranslationKey } from './src/translations';
 import {
   Search,
@@ -881,7 +883,7 @@ Do not add subtitles. Do not add text overlays. Do not add background music. Do 
           {currentPage === 'produtos' && <ProductsView products={viralProducts} />}
           {currentPage === 'videos' && <VideosView />}
           {currentPage === 'criadores' && <CreatorsView />}
-          {currentPage === 'ugc-criador' && <UGCCreatorView viralProducts={viralProducts} exploreTopProducts={exploreTopProducts} />}
+          {currentPage === 'ugc-criador' && <UGCCreatorView viralProducts={viralProducts} exploreTopProducts={exploreTopProducts} onBack={() => setCurrentPage('home')} />}
           {currentPage === 'galeria-avatares' && <GaleriaAvataresView onGoToMyAvatars={() => setCurrentPage('meus-avatares')} onCreateNew={() => setCurrentPage('criar-avatar')} />}
           {currentPage === 'galeria-prompts' && <GaleriaPromptsView />}
           {currentPage === 'meus-avatares' && <MeusAvataresView onBack={() => setCurrentPage('galeria-avatares')} onCreateNew={() => setCurrentPage('criar-avatar')} />}
@@ -2418,9 +2420,9 @@ const CreatorRow: React.FC<{ creator: CreatorViral }> = ({ creator }) => (
 );
 
 // --- UGC CREATOR VIEW (MULTI-STEP) ---
-const UGCCreatorView: React.FC<{ viralProducts: ProductViral[], exploreTopProducts: ProductExplore[] }> = ({ viralProducts, exploreTopProducts }) => {
-  const [step, setStep] = useState(1);
-  const [selectedStyle, setSelectedStyle] = useState<string | null>(null);
+const UGCCreatorView: React.FC<{ viralProducts: ProductViral[], exploreTopProducts: ProductExplore[], onBack: () => void }> = ({ viralProducts, exploreTopProducts, onBack }) => {
+  const [step, setStep] = useState(2);
+  const [selectedStyle, setSelectedStyle] = useState<string | null>('influencer');
   const [selectedInfluencer, setSelectedInfluencer] = useState<string | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'mulheres' | 'homens' | 'meus-avatares'>('mulheres');
@@ -2437,6 +2439,39 @@ const UGCCreatorView: React.FC<{ viralProducts: ProductViral[], exploreTopProduc
   const [takes, setTakes] = useState(['', '', '']);
   const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
   const [copiedTakes, setCopiedTakes] = useState<number[]>([]);
+  const [finalPrompt, setFinalPrompt] = useState<string>('');
+  const [perTakePrompts, setPerTakePrompts] = useState<string[]>([]);
+  const [isGeneratingScript, setIsGeneratingScript] = useState(false);
+  const [promptModalOpen, setPromptModalOpen] = useState(false);
+  const [promptModalContent, setPromptModalContent] = useState<{ title: string; text: string } | null>(null);
+
+  const numTakes = takes.filter(t => t.trim()).length || takes.length;
+
+  const handleGenerateScript = async () => {
+    setIsGeneratingScript(true);
+    try {
+      const productData = viralStepProducts.find(p => p.id === selectedProduct);
+      const influencerData = allInfluencers.find(i => i.id === selectedInfluencer);
+
+      const generated = await generateGeminiScript({
+        productTitle: productData?.title || 'Produto',
+        style: selectedStyle,
+        influencerName: influencerData?.name || null,
+        scenario: selectedScenario,
+        videoModel: selectedVideoModel,
+        tone: selectedTone,
+        duration: selectedDuration,
+        voiceGender: voiceGender,
+        voiceTone: selectedStepTone,
+        numTakes: takes.length,
+      });
+      setTakes(generated.map(t => t.slice(0, 200)));
+    } catch (err) {
+      console.error('Erro ao gerar roteiro:', err);
+    } finally {
+      setIsGeneratingScript(false);
+    }
+  };
 
   const handleDownloadImage = async (url: string, filename: string) => {
     try {
@@ -2536,10 +2571,10 @@ const UGCCreatorView: React.FC<{ viralProducts: ProductViral[], exploreTopProduc
   ];
 
   const loadingMessages = [
-    'Escolhendo o melhor cenário...',
-    'Ajustando a iluminação...',
-    'Sincronizando áudio e roteiro...',
-    'Finalizando sua experiência UGC...'
+    'Conectando ao Google Gemini AI...',
+    'Analisando seu produto e cenário...',
+    'Gerando prompts cinematográficos com IA...',
+    'Finalizando sua direção de vídeo UGC...'
   ];
 
   useEffect(() => {
@@ -2567,18 +2602,62 @@ const UGCCreatorView: React.FC<{ viralProducts: ProductViral[], exploreTopProduc
     setTimeout(() => setStep(4), 400);
   };
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     setIsLoading(true);
-    // Simulation of backend process
-    setTimeout(() => {
-      setIsLoading(false);
-      setStep(6); // Final result view
-    }, 6000); // 6 seconds for realistic loading
+
+    const influencerName = allInfluencers.find(i => i.id === selectedInfluencer)?.name || 'Avatar';
+    const productData = viralStepProducts.find(p => p.id === selectedProduct);
+    const productTitle = productData ? productData.title : 'Produto';
+
+    const ugcData = {
+      style: selectedStyle,
+      influencer: influencerName,
+      productTitle: productTitle,
+      scenario: selectedScenario,
+      videoModel: selectedVideoModel,
+      tone: selectedTone,
+      duration: selectedDuration,
+      voiceGender: voiceGender,
+      voiceTone: selectedStepTone,
+      takes: takes
+    };
+
+    // Usa o Gemini para gerar prompts avançados por IA (fallback local se falhar)
+    const takePrompts = await generateGeminiPerTakePrompts(ugcData);
+    const generatedPrompt = takePrompts.join('\n\n\n---\n\n\n') || generateUGCPrompt(ugcData);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('ugc_generations').insert([{
+          user_id: user.id,
+          style: selectedStyle,
+          influencer: influencerName,
+          product: productTitle,
+          scenario: selectedScenario,
+          video_model: selectedVideoModel,
+          tone: selectedTone,
+          duration: selectedDuration,
+          voice_gender: voiceGender,
+          voice_tone: selectedStepTone,
+          takes: takes,
+          final_prompt: generatedPrompt
+        }]);
+      } else {
+        console.warn('Usuário não autenticado. O prompt foi gerado mas não foi salvo no Supabase.');
+      }
+    } catch (error) {
+      console.error('Erro ao salvar no Supabase:', error);
+    }
+
+    setPerTakePrompts(takePrompts);
+    setFinalPrompt(generatedPrompt);
+    setIsLoading(false);
+    setStep(6);
   };
 
   const getStepTitle = () => {
     switch (step) {
-      case 1: return 'Estética de Filmagem';
       case 2: return 'Avatar / Influencer';
       case 3: return 'Produto';
       case 4: return 'Configuração Visual';
@@ -2623,7 +2702,7 @@ const UGCCreatorView: React.FC<{ viralProducts: ProductViral[], exploreTopProduc
       {/* Header Step Indicator */}
       <div className={`text-center ${step === 6 ? 'mb-16' : 'mb-10'}`}>
         <span className="text-[11px] font-black text-[#5b5b7b] uppercase tracking-[0.5em] mb-4 block opacity-80">
-          PASSO {step === 6 ? '5' : step} DE 5
+          PASSO {step === 6 ? '4' : step - 1} DE 4
         </span>
         {step !== 6 && (
           <h1 className="text-[34px] font-black text-white tracking-tight">
@@ -2635,7 +2714,7 @@ const UGCCreatorView: React.FC<{ viralProducts: ProductViral[], exploreTopProduc
       {/* Progress Bar */}
       {step !== 6 && (
         <div className="flex items-center gap-4 mb-20 w-full max-w-[640px] justify-center">
-          {[1, 2, 3, 4, 5].map((s) => (
+          {[2, 3, 4, 5, 6].map((s) => (
             <div
               key={s}
               className={`h-[3px] flex-1 rounded-full transition-all duration-500 ${step >= s ? 'bg-gradient-to-r from-[#3B82F6] via-[#3B82F6] to-[#8B5CF6] shadow-[0_0_12px_rgba(59,130,246,0.3)]' : 'bg-[#222226]'}`}
@@ -2644,64 +2723,6 @@ const UGCCreatorView: React.FC<{ viralProducts: ProductViral[], exploreTopProduc
         </div>
       )}
 
-      {/* Step 1: Estética de Filmagem */}
-      {step === 1 && (
-        <div className="w-full max-w-[1080px] bg-[#16161A] border border-[#222226]/60 rounded-[56px] p-16 shadow-2xl animate-in fade-in zoom-in duration-500">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-            <div
-              onClick={() => handleStyleSelect('influencer')}
-              className={`relative bg-black border-2 rounded-[48px] p-10 flex flex-col items-center cursor-pointer transition-all duration-300 hover:scale-[1.01] group ${selectedStyle === 'influencer' ? 'border-[#3B82F6] shadow-[0_0_40px_rgba(59,130,246,0.05)]' : 'border-[#222226]'}`}
-            >
-              <div className="absolute top-8 right-8">
-                <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all ${selectedStyle === 'influencer' ? 'border-[#3B82F6] bg-[#3B82F6]' : 'border-[#44444f]'}`}>
-                  {selectedStyle === 'influencer' && <div className="w-2.5 h-2.5 bg-white rounded-full"></div>}
-                </div>
-              </div>
-              <div className="w-full aspect-[4/5] mt-6 mb-12 flex items-center justify-center relative overflow-hidden">
-                {/* Imagem 1 — visível por padrão, some no hover */}
-                <img
-                  src="https://i.imgur.com/3LCqAVE.jpeg"
-                  alt="Vídeo com Influencer"
-                  className="absolute inset-0 w-full h-full object-contain transition-opacity duration-500 opacity-100 group-hover:opacity-0"
-                />
-                {/* Imagem 2 — invisible por padrão, aparece no hover */}
-                <img
-                  src="https://i.imgur.com/BuU2E97.jpeg"
-                  alt="Vídeo com Influencer alternativo"
-                  className="absolute inset-0 w-full h-full object-contain transition-opacity duration-500 opacity-0 group-hover:opacity-100"
-                />
-                <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-black to-transparent z-10"></div>
-              </div>
-              <h3 className="text-[24px] font-black text-white mb-4 tracking-tight">Vídeo com Influencer</h3>
-              <p className="text-[#8d8d99] text-[16px] text-center leading-[1.6] font-medium max-w-[320px] opacity-90">
-                O avatar aparece em cena interagindo com o produto (segurando, vestindo or usando). Ideal para gerar conexão e autoridade.
-              </p>
-            </div>
-            <div
-              onClick={() => handleStyleSelect('review')}
-              className={`relative bg-black border-2 rounded-[48px] p-10 flex flex-col items-center cursor-pointer transition-all duration-300 hover:scale-[1.01] ${selectedStyle === 'review' ? 'border-[#3B82F6] shadow-[0_0_40px_rgba(59,130,246,0.05)]' : 'border-[#222226]'}`}
-            >
-              <div className="absolute top-8 right-8">
-                <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center transition-all ${selectedStyle === 'review' ? 'border-[#3B82F6] bg-[#3B82F6]' : 'border-[#44444f]'}`}>
-                  {selectedStyle === 'review' && <div className="w-2.5 h-2.5 bg-white rounded-full"></div>}
-                </div>
-              </div>
-              <div className="w-full aspect-[4/5] mt-6 mb-12 flex items-center justify-center relative overflow-hidden">
-                <img
-                  src="https://i.imgur.com/wY6LYME.jpeg"
-                  alt="Vídeo estilo review"
-                  className="w-full h-full object-contain"
-                />
-                <div className="absolute inset-x-0 bottom-0 h-32 bg-gradient-to-t from-black to-transparent"></div>
-              </div>
-              <h3 className="text-[24px] font-black text-white mb-4 tracking-tight">Vídeo estilo review</h3>
-              <p className="text-[#8d8d99] text-[16px] text-center leading-[1.6] font-medium max-w-[320px] opacity-90">
-                O avatar não aparece. Foco total nas hands manuseando o produto em primeira pessoa (POV). Ideal para detalhes e unboxing.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Step 2: Avatar / Influencer */}
       {step === 2 && (
@@ -2710,7 +2731,7 @@ const UGCCreatorView: React.FC<{ viralProducts: ProductViral[], exploreTopProduc
             <>
               <div className="flex items-center justify-between mb-10">
                 <h2 className="text-2xl font-black text-white tracking-tight">Estilo POV</h2>
-                <button onClick={() => setStep(1)} className="text-[#5b5b7b] hover:text-white text-sm font-black flex items-center gap-2 transition-all">
+                <button onClick={onBack} className="text-[#5b5b7b] hover:text-white text-sm font-black flex items-center gap-2 transition-all">
                   Voltar
                 </button>
               </div>
@@ -2730,7 +2751,7 @@ const UGCCreatorView: React.FC<{ viralProducts: ProductViral[], exploreTopProduc
             <>
               <div className="flex items-center justify-between mb-10">
                 <h2 className="text-2xl font-black text-white tracking-tight">Selecione o Influencer</h2>
-                <button onClick={() => setStep(1)} className="text-[#5b5b7b] hover:text-white text-sm font-black flex items-center gap-2 transition-all">
+                <button onClick={onBack} className="text-[#5b5b7b] hover:text-white text-sm font-black flex items-center gap-2 transition-all">
                   Voltar
                 </button>
               </div>
@@ -2952,7 +2973,19 @@ const UGCCreatorView: React.FC<{ viralProducts: ProductViral[], exploreTopProduc
 
           <div className="flex justify-end pt-8 border-t border-[#222226]">
             <button
-              onClick={() => setStep(5)}
+              onClick={() => {
+                // Mapeia a duração selecionada para o número de takes
+                const durationToTakes: Record<string, number> = {
+                  '1take': 1,
+                  '2takes': 2,
+                  '3takes': 3,
+                  '4takes': 4,
+                  '5takes': 5,
+                };
+                const numTakes = durationToTakes[selectedDuration || ''] || 3;
+                setTakes(Array.from({ length: numTakes }, () => ''));
+                setStep(5);
+              }}
               disabled={!selectedScenario || !selectedVideoModel || !selectedTone || !selectedDuration}
               className={`px-12 py-4 rounded-2xl text-base font-black flex items-center gap-3 transition-all ${selectedScenario && selectedVideoModel && selectedTone && selectedDuration ? 'bg-gradient-to-r from-[#3B82F6] to-[#8B5CF6] text-white shadow-xl shadow-[#3B82F6]/30 hover:scale-[1.03]' : 'bg-[#222226] text-[#5b5b7b] cursor-not-allowed'}`}
             >
@@ -3019,9 +3052,28 @@ const UGCCreatorView: React.FC<{ viralProducts: ProductViral[], exploreTopProduc
                   <FileText className="w-3.5 h-3.5 text-[#a8a8b3]" />
                   Criar Roteiro
                 </button>
-                <button className="flex items-center gap-2 px-5 py-2.5 bg-[#3B82F6]/10 border border-[#3B82F6]/20 text-[#3B82F6] rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-[#3B82F6]/20 transition-all">
-                  <Wand2 className="w-3.5 h-3.5" />
-                  Gerar com IA
+                <button
+                  onClick={handleGenerateScript}
+                  disabled={isGeneratingScript || !selectedProduct}
+                  className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${isGeneratingScript
+                    ? 'bg-[#3B82F6]/5 border border-[#3B82F6]/20 text-[#3B82F6]/50 cursor-not-allowed'
+                    : 'bg-[#3B82F6]/10 border border-[#3B82F6]/20 text-[#3B82F6] hover:bg-[#3B82F6]/20'
+                    }`}
+                >
+                  {isGeneratingScript ? (
+                    <>
+                      <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                      </svg>
+                      Gerando...
+                    </>
+                  ) : (
+                    <>
+                      <Wand2 className="w-3.5 h-3.5" />
+                      Gerar com IA
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -3233,45 +3285,56 @@ const UGCCreatorView: React.FC<{ viralProducts: ProductViral[], exploreTopProduc
                   <div className="w-7 h-7 bg-[#1c1c21] border border-[#222226] rounded-full flex items-center justify-center text-[11px] font-black text-[#44444f] shadow-lg">2</div>
                   <div className="flex-1">
                     <h4 className="text-[19px] font-black text-[#e1e1e6] mb-1.5 tracking-tight">Roteiro de Direção (Veo 3)</h4>
-                    <p className="text-[#5b5b7b] text-sm font-medium leading-relaxed mb-10">3 takes de 8 segundos cada. Gere cada vídeo separadamente e junte na edição.</p>
+                    <p className="text-[#5b5b7b] text-sm font-medium leading-relaxed mb-10">{takes.length} take{takes.length > 1 ? 's' : ''} de 8 segundos cada. Gere cada vídeo separadamente e junte na edição.</p>
 
                     <div className="flex flex-col gap-4">
-                      {[1, 2, 3].map((take) => (
-                        <div key={take} className={`bg-[#1c1c21] border rounded-[24px] p-6 flex flex-col gap-5 group transition-all duration-500 ${copiedTakes.includes(take) ? 'border-[#00b37e]/30 bg-[#00b37e]/5' : 'border-[#222226] hover:border-[#3B82F6]/20'}`}>
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className={`w-2.5 h-2.5 rounded-full transition-all duration-500 ${copiedTakes.includes(take) ? 'bg-[#00b37e] shadow-[0_0_15px_rgba(0,179,126,0.4)] scale-110' : 'bg-[#00b37e] shadow-[0_0_10px_rgba(0,179,126,0.3)]'}`}></div>
-                              <span className="text-[10px] font-black text-[#5b5b7b] uppercase tracking-[0.25em]">TAKE {take}/3</span>
+                      {takes.map((_, index) => {
+                        const take = index + 1; return (
+                          <div key={take} className={`bg-[#1c1c21] border rounded-[24px] p-6 flex flex-col gap-5 group transition-all duration-500 ${copiedTakes.includes(take) ? 'border-[#00b37e]/30 bg-[#00b37e]/5' : 'border-[#222226] hover:border-[#3B82F6]/20'}`}>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className={`w-2.5 h-2.5 rounded-full transition-all duration-500 ${copiedTakes.includes(take) ? 'bg-[#00b37e] shadow-[0_0_15px_rgba(0,179,126,0.4)] scale-110' : 'bg-[#00b37e] shadow-[0_0_10px_rgba(0,179,126,0.3)]'}`}></div>
+                                <span className="text-[10px] font-black text-[#5b5b7b] uppercase tracking-[0.25em]">TAKE {take}/{takes.filter(t => t.trim()).length || 3}</span>
+                              </div>
+                              {perTakePrompts[take - 1] && (
+                                <button
+                                  onClick={() => {
+                                    setPromptModalContent({ title: `TAKE ${take} — Prompt Completo`, text: perTakePrompts[take - 1] });
+                                    setPromptModalOpen(true);
+                                  }}
+                                  className="text-[9px] font-black text-[#3B82F6] uppercase tracking-[0.2em] hover:text-white transition-colors underline underline-offset-[6px]"
+                                >[Ver Prompt]</button>
+                              )}
                             </div>
-                            <button className="text-[9px] font-black text-[#5b5b7b] uppercase tracking-[0.2em] hover:text-white transition-colors underline underline-offset-[6px]">[Ver Prompt]</button>
-                          </div>
 
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(`Prompt do Take ${take}`);
-                              if (!copiedTakes.includes(take)) {
-                                setCopiedTakes(prev => [...prev, take]);
-                              }
-                            }}
-                            className={`w-full flex items-center justify-center gap-3 py-4 rounded-2xl text-[13px] font-black transition-all duration-300 shadow-lg active:scale-[0.98] overflow-hidden relative ${copiedTakes.includes(take)
-                              ? 'bg-[#00b37e]/20 text-[#00b37e] border border-[#00b37e]/30'
-                              : 'bg-[#8d8d99] hover:bg-[#a8a8b3] text-black border border-transparent hover:-translate-y-0.5'
-                              }`}
-                          >
-                            {copiedTakes.includes(take) ? (
-                              <>
-                                <CheckCircle2 className="w-4 h-4 animate-in zoom-in duration-300" />
-                                <span className="animate-in fade-in slide-in-from-bottom-2 duration-300">Take {take} Concluído</span>
-                              </>
-                            ) : (
-                              <>
-                                <ArrowUpRight className="w-4 h-4 stroke-[3px]" />
-                                <span>Copiar Take {take}</span>
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      ))}
+                            <button
+                              onClick={() => {
+                                const promptText = perTakePrompts[take - 1] || `Prompt do Take ${take}: "${takes[take - 1]}"`;
+                                navigator.clipboard.writeText(promptText);
+                                if (!copiedTakes.includes(take)) {
+                                  setCopiedTakes(prev => [...prev, take]);
+                                }
+                              }}
+                              className={`w-full flex items-center justify-center gap-3 py-4 rounded-2xl text-[13px] font-black transition-all duration-300 shadow-lg active:scale-[0.98] overflow-hidden relative ${copiedTakes.includes(take)
+                                ? 'bg-[#00b37e]/20 text-[#00b37e] border border-[#00b37e]/30'
+                                : 'bg-[#8d8d99] hover:bg-[#a8a8b3] text-black border border-transparent hover:-translate-y-0.5'
+                                }`}
+                            >
+                              {copiedTakes.includes(take) ? (
+                                <>
+                                  <CheckCircle2 className="w-4 h-4 animate-in zoom-in duration-300" />
+                                  <span className="animate-in fade-in slide-in-from-bottom-2 duration-300">Take {take} Concluído</span>
+                                </>
+                              ) : (
+                                <>
+                                  <ArrowUpRight className="w-4 h-4 stroke-[3px]" />
+                                  <span>Copiar Take {take}</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -3298,6 +3361,48 @@ const UGCCreatorView: React.FC<{ viralProducts: ProductViral[], exploreTopProduc
       )}
 
       <div className="h-24"></div>
+
+      {/* MODAL: VER PROMPT */}
+      {promptModalOpen && promptModalContent && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => setPromptModalOpen(false)}
+        >
+          <div
+            className="relative w-full max-w-2xl max-h-[85vh] bg-[#111114] border border-[#2a2a35] rounded-[28px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-7 py-5 border-b border-[#222226]">
+              <div className="flex items-center gap-3">
+                <div className="w-2.5 h-2.5 rounded-full bg-[#3B82F6] shadow-[0_0_12px_rgba(59,130,246,0.6)]"></div>
+                <span className="text-[11px] font-black text-[#5b5b7b] uppercase tracking-[0.3em]">{promptModalContent.title}</span>
+              </div>
+              <button
+                onClick={() => setPromptModalOpen(false)}
+                className="w-8 h-8 flex items-center justify-center rounded-full bg-[#1c1c21] border border-[#2a2a35] text-[#5b5b7b] hover:text-white hover:border-[#3B82F6]/40 transition-all text-xl font-black leading-none"
+              >×</button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-7 py-6">
+              <pre className="text-[13px] text-[#c4c4cf] leading-relaxed whitespace-pre-wrap font-mono break-words">
+                {promptModalContent.text}
+              </pre>
+            </div>
+            <div className="px-7 py-5 border-t border-[#222226] flex gap-3">
+              <button
+                onClick={() => { navigator.clipboard.writeText(promptModalContent.text); setPromptModalOpen(false); }}
+                className="flex-1 py-3.5 bg-gradient-to-r from-[#3B82F6] to-[#8B5CF6] text-white rounded-2xl text-[13px] font-black flex items-center justify-center gap-2 hover:opacity-90 transition-all active:scale-[0.98] shadow-lg"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" /></svg>
+                Copiar Prompt Completo
+              </button>
+              <button
+                onClick={() => setPromptModalOpen(false)}
+                className="px-6 py-3.5 bg-[#1c1c21] border border-[#2a2a35] text-[#5b5b7b] rounded-2xl text-[13px] font-black hover:border-white/20 hover:text-white transition-all"
+              >Fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 };
@@ -4918,6 +5023,66 @@ const CriarAvatarView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     }
   };
 
+  // ── Gerar e copiar prompt + abrir Grok ───────────────────────────────────
+  const [copied, setCopied] = useState(false);
+
+  const handleGenerateGrok = async () => {
+    const genderLabel = gender === 'Fem' ? 'female' : 'male';
+    const accessoriesText = accessories.length > 0 ? accessories.join(', ') : 'none';
+    const marksText = authenticityMarks.includes('Natural') ? 'no notable marks' : authenticityMarks.join(', ');
+
+    const prompt = `Generate an ultra-photorealistic portrait photo of a ${genderLabel} AI-generated synthetic character named ${name || 'the avatar'}.
+
+This is NOT a real person. This is a completely AI-generated fictional individual.
+
+PHYSICAL CHARACTERISTICS:
+- Age: ${age} years old
+- Ethnicity: ${ethnicity}
+- Eye color: ${eyeColor}
+- Face shape: ${faceShape}
+- Hair color: ${hairColor}
+- Hair style: ${hairStyle}
+- Authenticity marks: ${marksText}
+- Accessories: ${accessoriesText}
+
+VIBE & STYLE:
+- Overall style/vibe: ${vibe}
+- Gender presentation: ${genderLabel}
+
+PHOTO STYLE:
+- Ultra-photorealistic, not a painting or illustration
+- Shot with a professional camera, shallow depth of field, soft bokeh background
+- Natural studio lighting, soft and flattering
+- Looking directly at the camera with a natural authentic expression
+- High detail on skin texture, pores, hair strands
+- No AI artifacts, no plastic skin look
+- Portrait framing (head and shoulders)
+- Authentic, relatable, influencer-ready appearance
+- 4K quality
+
+This image will be used as a UGC content creator avatar. Make it look like a real lifestyle influencer photo.`;
+
+    try {
+      await navigator.clipboard.writeText(prompt);
+    } catch {
+      // fallback for older browsers
+      const el = document.createElement('textarea');
+      el.value = prompt;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+    }
+
+    setCopied(true);
+    setTimeout(() => setCopied(false), 3000);
+
+    // Open Grok after a short delay so the user sees the copy confirmation
+    setTimeout(() => {
+      window.open('https://grok.com', '_blank', 'noopener,noreferrer');
+    }, 600);
+  };
+
   // Determine if the form is complete enough to generate
   const isFormComplete = name.trim().length > 0;
 
@@ -5183,13 +5348,13 @@ const CriarAvatarView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
           <div className="bg-[#0B0B0E] border border-[#222226] rounded-[40px] p-10 flex flex-col items-center gap-8 shadow-2xl relative overflow-hidden group">
             {isFormComplete ? (
               <button
-                onClick={() => window.open('https://x.ai/', '_blank', 'noopener,noreferrer')}
+                onClick={handleGenerateGrok}
                 className="w-full py-6 bg-gradient-to-r from-[#3B82F6] via-[#8B5CF6] to-[#EC4899] text-white rounded-[32px] font-black text-lg flex items-center justify-center gap-3 transition-all hover:scale-[1.05] hover:shadow-[0_0_30px_rgba(236,72,153,0.5)] active:scale-[0.98] animate-in fade-in zoom-in duration-300 group"
               >
                 <div className="w-8 h-8 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center transition-transform group-hover:rotate-12">
-                  <ArrowUpRight className="w-5 h-5 text-white stroke-[4px]" />
+                  {copied ? <span className="text-xs font-black">✓</span> : <ArrowUpRight className="w-5 h-5 text-white stroke-[4px]" />}
                 </div>
-                Gerar Foto no Grok
+                {copied ? 'Prompt Copiado! Abrindo Grok...' : 'Gerar Foto no Grok'}
               </button>
             ) : (
               <button className="w-full py-5 bg-[#24242a] text-[#5b5b7b] rounded-[28px] font-black text-base flex items-center justify-center gap-3 cursor-not-allowed border border-white/5 transition-all">
