@@ -457,16 +457,91 @@ const App: React.FC = () => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setIsAuthenticated(!!session);
       setIsLoadingAuth(false);
+      if (session) {
+        fetchProfile();
+      }
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setIsAuthenticated(!!session);
+      if (session) {
+        fetchProfile();
+      } else {
+        setUserProfileImage(null);
+      }
     });
 
     return () => subscription.unsubscribe();
   }, []);
+
+  const fetchProfile = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('avatar_url')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (data && data.avatar_url) {
+        setUserProfileImage(data.avatar_url);
+      }
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+    }
+  };
+
+  const handleProfileImageUpload = async (base64OrFile: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Extract content type and base64 data
+      const match = base64OrFile.match(/^data:(image\/\w+);base64,(.+)$/);
+      if (!match) return;
+
+      const contentType = match[1];
+      const base64Data = match[2];
+      const binaryString = window.atob(base64Data);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: contentType });
+
+      const fileExt = contentType.split('/')[1];
+      const fileName = `${user.id}/${Date.now()}.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(fileName, blob, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(fileName);
+
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .upsert({
+          id: user.id,
+          avatar_url: publicUrl,
+          updated_at: new Date().toISOString()
+        });
+
+      if (updateError) throw updateError;
+
+      setUserProfileImage(publicUrl);
+    } catch (error) {
+      console.error('Error uploading profile image:', error);
+      alert('Erro ao carregar imagem de perfil.');
+    }
+  };
 
   const t = (key: TranslationKey) => translations[language][key] || key;
 
@@ -900,7 +975,7 @@ Do not add subtitles. Do not add text overlays. Do not add background music. Do 
           {currentPage === 'configuracoes' && (
             <ConfiguracoesView
               profileImage={userProfileImage}
-              onImageUpload={(url) => setUserProfileImage(url)}
+              onImageUpload={handleProfileImageUpload}
               onLogout={async () => {
                 await supabase.auth.signOut();
                 setCurrentPage('explorar'); // Also reset the page to the default for the next login
